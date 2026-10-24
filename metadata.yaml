@@ -1,0 +1,12 @@
+name: astrbot_plugin_ow_stats
+display_name: 守望评分 · 高清长图
+desc: 绑定、解绑、截图或战网ID查询；复用网页评分，输出展开全部逐场详情的高清长图。
+version: v2.0.0
+author: lkevaer
+repo: https://github.com/lkevaer/astrbot_plugin_ow_stats
+astrbot_version: ">=4.29.1,<5"
+support_platforms:
+  - qq_official
+  - qq_official_webhook
+  - aiocqhttp
+  - webchat

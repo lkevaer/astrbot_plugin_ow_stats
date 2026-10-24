@@ -1,0 +1,13 @@
+name: astrbot-ow-stats
+services:
+  astrbot:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6185:6185"
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data:/AstrBot/data
+    init: true
+    shm_size: "512mb"

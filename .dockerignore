@@ -1,0 +1,14 @@
+*
+!requirements.txt
+!main.py
+!core.py
+!render.py
+!__init__.py
+!metadata.yaml
+!_conf_schema.json
+!README.md
+!LICENSE
+!report_ui/
+!report_ui/**
+!deploy/
+!deploy/start.py
