@@ -29,6 +29,12 @@ REPORT_PREPARE = """report => {
         value.className = 'static-metric'; value.textContent = button.textContent;
         button.replaceWith(value);
     });
+    document.querySelectorAll('main .sort-metric').forEach(button => {
+        const label = document.createElement('span');
+        label.className = 'static-heading';
+        label.textContent = button.querySelector('.sort-label').textContent;
+        button.replaceWith(label);
+    });
     document.querySelectorAll('main button').forEach(node => node.remove());
     document.querySelector('.sub').textContent = '近12场休闲或竞技表现 · 玩家逐场详情已展开';
     document.querySelectorAll('#details > details').forEach(node => node.open = true);
@@ -59,6 +65,7 @@ REPORT_PREPARE = """report => {
 REPORT_CSS = """
 main { max-width: none; width: 1600px; margin: 0; padding-bottom: 28px; }
 .scroll { overflow: visible !important; }
+.sortable-heading { color: var(--muted) !important; }
 #scoringReference:not([open]) > :not(summary) { display: none !important; }
 .bot-summary { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px;
     border: 1px solid #536b89; border-radius: 9px; background: #101a2a;

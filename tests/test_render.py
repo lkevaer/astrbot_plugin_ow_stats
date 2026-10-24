@@ -149,6 +149,11 @@ class RenderTests(unittest.IsolatedAsyncioTestCase):
                     controls: document.querySelectorAll('main input, main textarea, main button, #selfBinding, .inputs').length,
                     webDetails: document.querySelectorAll('.match-details-row, .toggle-match-details, #metricHint, .metric-button').length,
                     values: [...document.querySelectorAll('.static-metric')].map(node => node.textContent),
+                    headings: [...document.querySelectorAll('#details > details:first-child > .scroll > table > thead th')].map(node => node.textContent.trim()),
+                    alignedValues: [...document.querySelectorAll('#details .metrics > tbody > tr')].every(row => {
+                        const tops = [...row.querySelectorAll('.metric-main')].map(node => node.getBoundingClientRect().top);
+                        return !tops.length || Math.max(...tops) - Math.min(...tops) < .6;
+                    }),
                     rulesOpen: document.querySelector('#scoringReference').open,
                     rulesVisibleHeight: document.querySelector('.rule-reference').getBoundingClientRect().height,
                     footer: document.querySelector('#botRulesFooter').textContent,
@@ -194,6 +199,20 @@ class RenderTests(unittest.IsolatedAsyncioTestCase):
                         self.assertFalse(observed["clipped"])
                         self.assertEqual(observed["controls"], 0)
                         self.assertEqual(observed["webDetails"], 0)
+                        self.assertTrue(observed["alignedValues"])
+                        for heading in [
+                            "本场评分",
+                            "最后一击占比",
+                            "FLETA指数",
+                            "击杀",
+                            "助攻",
+                            "阵亡",
+                            "KD",
+                            "伤害/10分",
+                            "治疗/10分",
+                        ]:
+                            self.assertIn(heading, observed["headings"])
+                        self.assertNotIn("胜负", observed["headings"])
                         self.assertNotIn("网页专属#9876", observed["body"])
                         for value in ["28", "9", "3", "86.0%"]:
                             self.assertIn(value, observed["values"])

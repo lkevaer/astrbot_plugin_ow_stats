@@ -77,3 +77,5 @@ python preview.py --players 5 --output output/preview-5players.png
 评分服务来自 [DustEater/ow_stats_query](https://github.com/DustEater/ow_stats_query) 及 [lkevaer/ow_stats_query](https://github.com/lkevaer/ow_stats_query) 的定制版本；此仓库延续之前的本地 `astrbot_plugin_ow_stats`。遵循 [GPL-3.0](LICENSE)。
 
 网页版的“展开对局详情”子表和数值评分说明只用于网页。机器人长图保留查询玩家原有的逐场数据，不展开其余九人的子表；所有数据数值在静态渲染时保留为文本。机器人结果附可点击的 HTTPS 网页链接。
+
+网页版全员表包含查询目标，并支持各项数据升降序排序；这些子表和排序控件不会出现在机器人图片中。机器人使用相同的紧凑数值对齐、地图上下排版及段位/胜负合并布局，排序表头会转换为静态文字。
