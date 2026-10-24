@@ -1,12 +1,12 @@
 # 网页界面快照
 
-以下文件取自 `lkevaer/ow_stats_query` 的 `api_server/static/`，提交为 [`f3ae59bed3daa7d8c918a591e0faad2e2bb06fdd`](https://github.com/lkevaer/ow_stats_query/commit/f3ae59bed3daa7d8c918a591e0faad2e2bb06fdd)。
+以下文件取自 `lkevaer/ow_stats_query` 的 `api_server/static/`，提交为 [`d0711d644c1bd47a05e4f956b88414b988313da9`](https://github.com/lkevaer/ow_stats_query/commit/d0711d644c1bd47a05e4f956b88414b988313da9)。
 
 | 文件 | Git blob SHA |
 | --- | --- |
 | `batch_rating.html` | `495f1055efa064e4531929f8fcd23265ec550158` |
 | `batch_rating.css` | `fc6112f6b566f3f71b4805faf9d6a723cad67c8f` |
-| `batch_rating.js` | `26c0ab97936d4ba6460522b47c029804ffb7fa6a` |
+| `batch_rating.js` | `5a2f323b76e25fb67ad69bf1252677961db487ff` |
 | `rating_account.js` | `6569ad7469750f71c31981b61171c08bdab0c10e` |
 | `hero_rates.html` | `747fc416d6523ba1cca7cff486d849766790f7ef` |
 | `hero_rates.css` | `312da9760b71dea323501450fefa6038ce0b4e32` |
