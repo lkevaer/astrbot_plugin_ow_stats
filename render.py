@@ -8,6 +8,8 @@ import json
 import math
 import os
 import re
+import struct
+import zlib
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -223,11 +225,11 @@ class WebRenderer:
                             timeout=60000,
                         )
                     )
-                return await asyncio.to_thread(
-                    self._join_tiles, tiles, width * 2, height * 2
-                )
             finally:
                 await context.close()
+            return await asyncio.to_thread(
+                self._join_tiles, tiles, width * 2, height * 2
+            )
 
     @staticmethod
     def _join_tiles(tiles: list[bytes], width: int, height: int) -> bytes:
@@ -244,19 +246,38 @@ class WebRenderer:
         Raises:
             ValueError: A screenshot has unexpected dimensions or is incomplete.
         """
-        with Image.new("RGB", (width, height)) as canvas:
-            offset = 0
-            for tile in tiles:
-                with Image.open(io.BytesIO(tile)) as image:
-                    if image.width != width or offset + image.height > height:
-                        raise ValueError("长图分段尺寸异常，本次未输出不完整图片。")
-                    canvas.paste(image, (0, offset))
-                    offset += image.height
-            if offset != height:
-                raise ValueError("长图分段不完整，本次未输出不完整图片。")
-            output = io.BytesIO()
-            canvas.save(output, format="PNG", compress_level=9)
-            return output.getvalue()
+        output = io.BytesIO()
+        output.write(b"\x89PNG\r\n\x1a\n")
+
+        def write_chunk(kind: bytes, payload: bytes):
+            """Write a PNG chunk and its checksum to the output stream."""
+            output.write(struct.pack(">I", len(payload)))
+            output.write(kind + payload)
+            output.write(struct.pack(">I", zlib.crc32(kind + payload)))
+
+        write_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        compressor = zlib.compressobj(9)
+        stride = width * 3
+        offset = 0
+        # Encode one tile at a time instead of allocating a full-height canvas.
+        for tile in tiles:
+            with Image.open(io.BytesIO(tile)) as source:
+                if source.width != width or offset + source.height > height:
+                    raise ValueError("长图分段尺寸异常，本次未输出不完整图片。")
+                with source.convert("RGB") as image:
+                    pixels = image.tobytes()
+                offset += source.height
+            for row in range(0, len(pixels), stride):
+                # Filter 0 keeps each row independent across tile boundaries.
+                compressed = compressor.compress(b"\0" + pixels[row : row + stride])
+                if compressed:
+                    write_chunk(b"IDAT", compressed)
+            del pixels
+        if offset != height:
+            raise ValueError("长图分段不完整，本次未输出不完整图片。")
+        write_chunk(b"IDAT", compressor.flush())
+        write_chunk(b"IEND", b"")
+        return output.getvalue()
 
     async def close(self):
         """Release the renderer when AstrBot unloads the plugin."""

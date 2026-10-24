@@ -5,7 +5,7 @@ import struct
 import unittest
 from unittest.mock import patch
 
-from PIL import Image, ImageChops
+from PIL import Image
 from playwright.async_api import Page
 
 from ..render import WebRenderer
@@ -13,6 +13,42 @@ from .fixtures import make_report
 
 
 class RenderTests(unittest.IsolatedAsyncioTestCase):
+    def test_join_tiles_preserves_every_pixel_across_boundaries(self):
+        tiles = []
+        with Image.new("RGB", (7, 5)) as expected:
+            offset = 0
+            for tile_height in [2, 3]:
+                with Image.new("RGBA", (7, tile_height)) as tile:
+                    tile.putdata(
+                        [
+                            (x * 37, (y + offset) * 51, (x + y) * 23, x * 41)
+                            for y in range(tile_height)
+                            for x in range(7)
+                        ]
+                    )
+                    expected.paste(tile, (0, offset))
+                    output = io.BytesIO()
+                    tile.save(output, format="PNG")
+                    tiles.append(output.getvalue())
+                offset += tile_height
+            png = WebRenderer._join_tiles(tiles, 7, 5)
+            with Image.open(io.BytesIO(png)) as actual:
+                self.assertEqual(actual.mode, "RGB")
+                self.assertEqual(actual.size, expected.size)
+                self.assertEqual(actual.tobytes(), expected.tobytes())
+
+    def test_join_tiles_rejects_incomplete_or_mismatched_tiles(self):
+        with Image.new("RGB", (7, 2)) as tile:
+            output = io.BytesIO()
+            tile.save(output, format="PNG")
+        tiles = [output.getvalue()]
+        with self.assertRaisesRegex(ValueError, "尺寸异常"):
+            WebRenderer._join_tiles(tiles, 8, 2)
+        with self.assertRaisesRegex(ValueError, "尺寸异常"):
+            WebRenderer._join_tiles(tiles, 7, 1)
+        with self.assertRaisesRegex(ValueError, "不完整"):
+            WebRenderer._join_tiles(tiles, 7, 3)
+
     async def test_expanded_reports_keep_all_rows_without_horizontal_clipping(self):
         renderer = WebRenderer()
         original = Page.screenshot
@@ -86,23 +122,5 @@ class RenderTests(unittest.IsolatedAsyncioTestCase):
                         self.assertLessEqual(
                             observed["footerBottom"], observed["viewportHeight"]
                         )
-                        if count == 5:
-                            with (
-                                Image.open(io.BytesIO(png)) as joined,
-                                Image.open(io.BytesIO(captures[-1])) as tail,
-                            ):
-                                crop = joined.crop(
-                                    (
-                                        0,
-                                        joined.height - tail.height,
-                                        joined.width,
-                                        joined.height,
-                                    )
-                                )
-                                self.assertIsNone(
-                                    ImageChops.difference(
-                                        crop.convert("RGB"), tail.convert("RGB")
-                                    ).getbbox()
-                                )
         finally:
             await renderer.close()

@@ -1,7 +1,7 @@
 name: astrbot_plugin_ow_stats
 display_name: 守望评分 · 高清长图
 desc: 帮助、绑定、解绑、竞技与休闲查询；支持截图或战网ID，返回展开逐场详情的高清长图。
-version: v2.1.0
+version: v2.1.1
 author: lkevaer
 repo: https://github.com/lkevaer/astrbot_plugin_ow_stats
 astrbot_version: ">=4.29.1,<5"
