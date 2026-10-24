@@ -41,7 +41,7 @@
 
 网页 UI 随插件一起保存，因此绘图不依赖公开首页是否登录、浏览器绑定数据或网页可用性。版本来源见 [report_ui/SOURCE.md](report_ui/SOURCE.md)。API 服务仍需正常运行且具有有效的上游账号授权。
 
-韩服数据复用查询服务的 `/api/hero-rates` 缓存，不在每次机器人指令时重新抓取原站。默认组合预先同步；同一组合的角色与细分位置共用本地缓存。网页保留原站全部筛选项，新组合首次建立缓存，之后每24小时自动更新；刷新失败时保留上次数据并注明时间。英雄名称对应国服官网，UI保留原站的横幅、英雄头像、选取率/胜率/禁用率三列和彩色数据条。
+韩服数据复用查询服务的 `/api/hero-rates` 缓存，不在每次机器人指令时重新抓取原站。默认组合预先同步；同一组合的角色与细分位置共用本地缓存。网页保留原站全部筛选项，新组合首次建立缓存，之后每6小时自动更新；刷新失败时保留上次数据并注明时间。英雄名称对应国服官网，UI保留原站的横幅、英雄头像、选取率/胜率/禁用率三列和彩色数据条。
 
 ## 安装到现有 AstrBot
 
@@ -75,3 +75,5 @@ python preview.py --players 5 --output output/preview-5players.png
 ## 来源
 
 评分服务来自 [DustEater/ow_stats_query](https://github.com/DustEater/ow_stats_query) 及 [lkevaer/ow_stats_query](https://github.com/lkevaer/ow_stats_query) 的定制版本；此仓库延续之前的本地 `astrbot_plugin_ow_stats`。遵循 [GPL-3.0](LICENSE)。
+
+网页版的“展开对局详情”子表和数值评分说明只用于网页。机器人长图保留查询玩家原有的逐场数据，不展开其余九人的子表；所有数据数值在静态渲染时保留为文本。机器人结果附可点击的 HTTPS 网页链接。

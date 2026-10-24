@@ -23,12 +23,19 @@ REPORT_PREPARE = """report => {
     document.querySelector('.inputs').closest('section').remove();
     document.querySelector('#selfBinding')?.remove();
     document.querySelectorAll('.site-nav, .web-callout, .match-query-column').forEach(node => node.remove());
+    document.querySelectorAll('.match-details-row, #metricHint').forEach(node => node.remove());
+    document.querySelectorAll('main .metric-button').forEach(button => {
+        const value = document.createElement('span');
+        value.className = 'static-metric'; value.textContent = button.textContent;
+        button.replaceWith(value);
+    });
     document.querySelectorAll('main button').forEach(node => node.remove());
     document.querySelector('.sub').textContent = '近12场休闲或竞技表现 · 玩家逐场详情已展开';
-    document.querySelectorAll('#details details').forEach(node => node.open = true);
+    document.querySelectorAll('#details > details').forEach(node => node.open = true);
     document.querySelector('#scoringReference').open = false;
     document.querySelectorAll('#results .key span').forEach(node => {
         if (node.textContent === '展开玩家查看逐场详情') node.textContent = '玩家逐场详情（已展开）';
+        if (node.textContent.startsWith('数据下方±数字')) node.textContent = '数据下方±数字为该项相对基准的分数贡献。';
     });
     const summary = document.querySelector('#horseSummary');
     const output = document.createElement('div');
@@ -44,7 +51,7 @@ REPORT_PREPARE = """report => {
     }
     const footer = document.createElement('footer');
     footer.id = 'botRulesFooter';
-    footer.innerHTML = '<strong>访问 lkevaer.xyz</strong><span>进入网页版查询当局所有人评分评级</span><small>查询完整评分规则 · 展开每场详情，点击“查询当局”</small>';
+    footer.innerHTML = '<a href="https://lkevaer.xyz">https://lkevaer.xyz</a><span>进入网页版查询当局所有人评分评级</span><small>查询完整评分规则 · 展开每场详情，点击“查询当局”</small>';
     document.querySelector('main').append(footer);
     document.querySelectorAll('img[loading=lazy]').forEach(node => node.loading = 'eager');
 }"""
@@ -58,7 +65,7 @@ main { max-width: none; width: 1600px; margin: 0; padding-bottom: 28px; }
     font-size: 15px; line-height: 1.9; }
 #botRulesFooter { margin-top: 26px; padding: 24px; color: #f3d4a2;
     border: 1px solid #9e7b42; border-radius: 12px; background: #242d3d; text-align: center; }
-#botRulesFooter strong { display: block; color: #ffd18b; font-size: 24px; }
+#botRulesFooter a { display: block; color: #ffd18b; font-size: 24px; font-weight: 750; text-underline-offset: 5px; }
 #botRulesFooter span { display: block; font-size: 18px; margin-top: 7px; }
 #botRulesFooter small { display: block; color: #aebbd0; margin-top: 7px; font-size: 13px; }
 *, *::before, *::after { animation: none !important; transition: none !important; }

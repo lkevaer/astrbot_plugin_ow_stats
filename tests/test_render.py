@@ -22,6 +22,8 @@ class RenderTests(unittest.IsolatedAsyncioTestCase):
             observed.append(
                 await page.evaluate("""() => ({
                 count: document.querySelectorAll('#heroRateRows > tr').length,
+                animatedRows: document.querySelectorAll('#heroRateRows .reveal-row').length,
+                rowsVisible: [...document.querySelectorAll('#heroRateRows > tr')].every(row => getComputedStyle(row).opacity === '1'),
                 filters: [...document.querySelectorAll('.static-filter')].map(node => node.textContent),
                 body: document.querySelector('main').innerText,
                 controls: document.querySelectorAll('main input, main button, main select').length,
@@ -81,6 +83,8 @@ class RenderTests(unittest.IsolatedAsyncioTestCase):
                     actual = observed[-1]
                     width, height = struct.unpack(">II", png[16:24])
                     self.assertEqual(actual["count"], count)
+                    self.assertEqual(actual["animatedRows"], 0)
+                    self.assertTrue(actual["rowsVisible"])
                     self.assertEqual(actual["controls"], 0)
                     self.assertEqual(actual["sort"], "descending")
                     for item in [label, "大师", "所有地图", "PC", "韩服"]:
@@ -143,6 +147,8 @@ class RenderTests(unittest.IsolatedAsyncioTestCase):
                     rows: document.querySelectorAll('#details tbody > tr').length,
                     clipped: [...document.querySelectorAll('.scroll')].some(node => node.scrollWidth > node.clientWidth + 1),
                     controls: document.querySelectorAll('main input, main textarea, main button, #selfBinding, .inputs').length,
+                    webDetails: document.querySelectorAll('.match-details-row, .toggle-match-details, #metricHint, .metric-button').length,
+                    values: [...document.querySelectorAll('.static-metric')].map(node => node.textContent),
                     rulesOpen: document.querySelector('#scoringReference').open,
                     rulesVisibleHeight: document.querySelector('.rule-reference').getBoundingClientRect().height,
                     footer: document.querySelector('#botRulesFooter').textContent,
@@ -171,7 +177,13 @@ class RenderTests(unittest.IsolatedAsyncioTestCase):
                     with self.subTest(count=count, mode=mode):
                         observations.clear()
                         captures.clear()
-                        png = await renderer.render(make_report(count, mode))
+                        report = make_report(count, mode)
+                        report["players"][0]["matches"][0]["match_details"] = {
+                            "other_players": [{"battletag": "网页专属#9876"}],
+                            "total_players": 10,
+                            "rated_players": 10,
+                        }
+                        png = await renderer.render(report)
                         observed = observations[-1]
                         width, height = struct.unpack(">II", png[16:24])
                         self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")
@@ -181,10 +193,14 @@ class RenderTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(observed["rows"], count * 12)
                         self.assertFalse(observed["clipped"])
                         self.assertEqual(observed["controls"], 0)
+                        self.assertEqual(observed["webDetails"], 0)
+                        self.assertNotIn("网页专属#9876", observed["body"])
+                        for value in ["28", "9", "3", "86.0%"]:
+                            self.assertIn(value, observed["values"])
                         self.assertFalse(observed["rulesOpen"])
                         self.assertEqual(observed["rulesVisibleHeight"], 0)
                         self.assertLess(observed["lastBottom"], observed["mainBottom"])
-                        self.assertIn("访问 lkevaer.xyz", observed["footer"])
+                        self.assertIn("https://lkevaer.xyz", observed["footer"])
                         self.assertIn(
                             "进入网页版查询当局所有人评分评级", observed["footer"]
                         )

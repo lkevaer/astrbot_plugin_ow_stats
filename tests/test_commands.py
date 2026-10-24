@@ -6,7 +6,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 if importlib.util.find_spec("astrbot") is None:
     raise unittest.SkipTest("Install AstrBot or add its checkout to PYTHONPATH.")
@@ -148,11 +148,28 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
                 ),
             )
             self.assertIsInstance(replies[-1][1][0], Image)
+            self.assertTrue(
+                replies[-1][1][1]
+                .text.splitlines()[-1]
+                .startswith("https://lkevaer.xyz/hero-rates?role=" + role)
+            )
             self.assertEqual(
                 self.plugin.renderer.reports[-1]["report_type"], "hero_rates"
             )
             self.assertFalse(event.call_llm)
         self.assertEqual(self.plugin.bindings.get("qq-a", "sender-a"), "本人#1234")
+
+    async def test_rating_image_has_a_separate_clickable_https_result_link(self):
+        task_id = "a" * 32
+        self.plugin.api.rating = AsyncMock(
+            return_value={"players": [{"battletag": "测试#1234"}], "task_id": task_id}
+        )
+        replies = await self.command(Event("查询 测试#1234"))
+        self.assertIsInstance(replies[-1][1][0], Image)
+        self.assertEqual(
+            replies[-1][1][1].text.splitlines()[-1],
+            "https://lkevaer.xyz/?task=" + task_id,
+        )
 
     async def test_invalid_hero_statistics_role_gives_usage_without_querying(self):
         for text in ["韩服数据", "韩服数据 全部", "韩服数据 坦克 宗师"]:
@@ -181,7 +198,9 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
             for f in handler.event_filters
             if isinstance(f, CommandFilter)
         }
-        self.assertEqual(commands, {"绑定", "解绑", "查询", "查询休闲", "韩服数据", "help"})
+        self.assertEqual(
+            commands, {"绑定", "解绑", "查询", "查询休闲", "韩服数据", "help"}
+        )
 
     async def test_help_aliases_list_commands_and_stop_duplicate_help(self):
         for command in ["help", "帮助"]:

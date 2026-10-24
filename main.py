@@ -148,7 +148,7 @@ class OWStatsPlugin(Star):
             if re.fullmatch(r"[0-9a-f]{32}", str(report.get("task_id") or "")):
                 chain.append(
                     Plain(
-                        text="进入网页版查询当局所有人评分评级：https://lkevaer.xyz/?task="
+                        text="进入网页版查询当局所有人评分评级：\nhttps://lkevaer.xyz/?task="
                         + report["task_id"]
                     )
                 )
@@ -228,7 +228,7 @@ class OWStatsPlugin(Star):
         role = {"坦克": "tank", "输出": "damage", "辅助": "support"}.get(args.strip())
         if role is None:
             yield event.plain_result(
-                "用法：/韩服数据 坦克，或 /韩服数据 输出、/韩服数据 辅助。\n固定：韩服 · 大师 · 竞技职责预选 · 所有地图 · PC，按胜率排序，每24小时更新缓存。"
+                "用法：/韩服数据 坦克，或 /韩服数据 输出、/韩服数据 辅助。\n固定：韩服 · 大师 · 竞技职责预选 · 所有地图 · PC，按胜率排序，每6小时更新缓存。"
             )
             return
         identity, acquired = None, False
@@ -260,7 +260,15 @@ class OWStatsPlugin(Star):
                 yield event.plain_result("原站在这些筛选条件下暂无英雄数据。")
                 return
             picture = await self.renderer.render(report)
-            yield event.chain_result([Image.fromBytes(picture)])
+            yield event.chain_result(
+                [
+                    Image.fromBytes(picture),
+                    Plain(
+                        text="网页版英雄胜率数据（可切换全部筛选项）：\n"
+                        f"https://lkevaer.xyz/hero-rates?role={role}&rq=2&rank=master&map=all&input=pc&region=korea"
+                    ),
+                ]
+            )
         except ValueError as error:
             yield event.plain_result(str(error))
         except Exception as error:
