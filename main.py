@@ -1,4 +1,4 @@
-"""Provide three AstrBot commands backed by the existing OW rating service."""
+"""Provide help, account binding, and OW rating queries through AstrBot."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from astrbot.api.star import Context, Star
 from astrbot.core.star.filter.command import GreedyStr
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
-from .core import Bindings, OWClient, parse_tags, team_tags
+from .core import HELP, Bindings, OWClient, parse_tags, team_tags
 from .render import WebRenderer
 
 
@@ -37,9 +37,6 @@ class OWStatsPlugin(Star):
             Path(get_astrbot_data_path())
             / "plugin_data/astrbot_plugin_ow_stats/bindings.sqlite3"
         )
-        self.default_mode = config.get("default_mode", "competitive")
-        if self.default_mode not in {"competitive", "leisure"}:
-            raise ValueError("默认模式必须是 competitive 或 leisure。")
         self.api = OWClient(
             config.get("api_url", "https://lkevaer.xyz"),
             config.get("api_key", ""),
@@ -59,11 +56,12 @@ class OWStatsPlugin(Star):
     def _conversation(self, event):
         return (*self._identity(event), str(event.get_session_id()))
 
-    async def _image_tags(self, event):
+    async def _image_tags(self, event, command):
         """Pass a single bounded image to the service's existing OCR pipeline.
 
         Args:
             event: A command containing one roster screenshot.
+            command: Query command to preserve when asking for OCR corrections.
 
         Returns:
             Complete, validated BattleTags in the recognized order.
@@ -86,13 +84,15 @@ class OWStatsPlugin(Star):
         tags = parse_tags(" ".join(recognized.get("battletags", [])))
         if not tags:
             raise ValueError(
-                "未识别到完整ID，请裁剪名单后重试，或发送 /查询 昵称#12345。"
+                f"未识别到完整ID，请裁剪名单后重试，或发送 {command} 昵称#12345。"
             )
         if recognized.get("review_count"):
-            raise ValueError("识别有疑项，请核对后重新输入 /查询 " + " ".join(tags))
+            raise ValueError(
+                f"识别有疑项，请核对后重新输入 {command} " + " ".join(tags)
+            )
         return tags
 
-    async def _query(self, event, args, mode=None):
+    async def _query(self, event, args, mode="competitive"):
         event.should_call_llm(False)
         identity = None
         acquired = False
@@ -103,12 +103,8 @@ class OWStatsPlugin(Star):
                 return
             self.busy.add(identity)
             acquired = True
-            mode = mode or self.default_mode
+            command = "/查询休闲" if mode == "leisure" else "/查询"
             args = args.strip()
-            explicit_mode = re.match(r"^(竞技|休闲)(?:\s+|$)", args)
-            if explicit_mode:
-                mode = "competitive" if explicit_mode[1] == "竞技" else "leisure"
-                args = args[explicit_mode.end() :].strip()
             pictures = [
                 item for item in event.get_messages() if isinstance(item, Image)
             ]
@@ -126,15 +122,15 @@ class OWStatsPlugin(Star):
                 }
                 self.pending_images[self._conversation(event)] = (mode, now + 120)
                 yield event.plain_result(
-                    "请在2分钟内发送一张名单截图（群聊需@我），或发送 /查询 昵称#12345。\n"
-                    "用 /绑定 昵称#12345 后，/查询 可直接查自己。"
+                    f"请在2分钟内发送一张名单截图（群聊需@我），或发送 {command} 昵称#12345。\n"
+                    f"用 /绑定 昵称#12345 后，{command} 可直接查自己。"
                 )
                 return
             if pictures:
                 if tags:
                     raise ValueError("请附一张名单截图，或直接输入ID，两者任选其一。")
                 yield event.plain_result("正在识别名单截图…")
-                tags = await self._image_tags(event)
+                tags = await self._image_tags(event, command)
             self.pending_images.pop(self._conversation(event), None)
             # A single explicit ID is a temporary target. Rosters include the sender.
             tags = team_tags(tags, own if pictures or len(tags) != 1 else None)
@@ -170,7 +166,7 @@ class OWStatsPlugin(Star):
                 raise ValueError("用法：/绑定 昵称#12345；每人绑定一个账号。")
             self.bindings.set(*self._identity(event), tags[0])
             yield event.plain_result(
-                f"已绑定 {tags[0]}。发送 /查询 查自己，/解绑 解除绑定。"
+                f"已绑定 {tags[0]}。/查询 查近12场竞技，/查询休闲 查近12场休闲；/解绑 解除绑定，/帮助 查看全部用法。"
             )
         except ValueError as exc:
             yield event.plain_result(str(exc))
@@ -191,10 +187,30 @@ class OWStatsPlugin(Star):
         except ValueError as exc:
             yield event.plain_result(str(exc))
 
+    @filter.command("help", alias={"帮助"}, priority=100)
+    async def help_command(self, event: AstrMessageEvent):
+        """Return this bot's command guide before AstrBot's generic help handler."""
+        event.should_call_llm(False)
+        yield event.plain_result(HELP)
+        # Stop propagation after delivering the reply to avoid duplicate help.
+        event.stop_event()
+
     @filter.command("查询")
     async def query(self, event: AstrMessageEvent, args: GreedyStr):
-        """Query a BattleTag, a roster screenshot, or the sender's saved account."""
-        async for reply in self._query(event, args):
+        """Query recent competitive matches, accepting the old explicit mode prefix."""
+        mode = "competitive"
+        args = args.strip()
+        explicit_mode = re.match(r"^(竞技|休闲)(?:\s+|$)", args)
+        if explicit_mode:
+            mode = "competitive" if explicit_mode[1] == "竞技" else "leisure"
+            args = args[explicit_mode.end() :].strip()
+        async for reply in self._query(event, args, mode):
+            yield reply
+
+    @filter.command("查询休闲")
+    async def query_leisure(self, event: AstrMessageEvent, args: GreedyStr):
+        """Query recent leisure matches using a saved tag, explicit tags, or an image."""
+        async for reply in self._query(event, args, mode="leisure"):
             yield reply
 
     @filter.custom_filter(ScreenshotOnly)
@@ -209,7 +225,8 @@ class OWStatsPlugin(Star):
             return
         if pending[1] <= time.monotonic():
             event.should_call_llm(False)
-            yield event.plain_result("等待截图已超时，请重新发送 /查询 图片。")
+            command = "/查询休闲" if pending[0] == "leisure" else "/查询"
+            yield event.plain_result(f"等待截图已超时，请重新发送 {command} 图片。")
             return
         async for reply in self._query(event, "", mode=pending[0]):
             yield reply

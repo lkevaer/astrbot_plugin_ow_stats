@@ -36,6 +36,7 @@ class Event:
         self.is_at_or_wake_command = True
         self.extras = {}
         self.call_llm = True
+        self.stopped = False
 
     def get_platform_id(self):
         return self.platform
@@ -60,6 +61,9 @@ class Event:
 
     def should_call_llm(self, value):
         self.call_llm = value
+
+    def stop_event(self):
+        self.stopped = True
 
     def plain_result(self, text):
         return "text", text
@@ -124,7 +128,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
                 ]
         self.fail("AstrBot did not recognize the requested command.")
 
-    async def test_only_three_commands_are_registered(self):
+    async def test_command_registry_includes_help_alias_and_leisure(self):
         commands = {
             f.command_name
             for handler in star_handlers_registry
@@ -132,7 +136,93 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
             for f in handler.event_filters
             if isinstance(f, CommandFilter)
         }
-        self.assertEqual(commands, {"绑定", "解绑", "查询"})
+        self.assertEqual(commands, {"绑定", "解绑", "查询", "查询休闲", "help"})
+
+    async def test_help_aliases_list_commands_and_stop_duplicate_help(self):
+        for command in ["help", "帮助"]:
+            with self.subTest(command=command):
+                event = Event(command)
+                replies = await self.command(event)
+                self.assertEqual(len(replies), 1)
+                for entry in [
+                    "/help",
+                    "/帮助",
+                    "/绑定",
+                    "/解绑",
+                    "/查询",
+                    "/查询休闲",
+                    "近12场竞技",
+                    "近12场休闲",
+                    "图片",
+                ]:
+                    self.assertIn(entry, replies[0][1])
+                self.assertFalse(event.call_llm)
+                self.assertTrue(event.stopped)
+        self.assertEqual(self.plugin.api.calls, [])
+
+    async def test_bot_help_runs_before_astrbot_builtin_help(self):
+        importlib.import_module("astrbot.builtin_stars.builtin_commands.main")
+        help_handlers = [
+            handler
+            for handler in star_handlers_registry
+            if any(
+                isinstance(condition, CommandFilter)
+                and condition.command_name == "help"
+                for condition in handler.event_filters
+            )
+        ]
+        self.assertEqual(help_handlers[0].handler_module_path, OWStatsPlugin.__module__)
+        self.assertTrue(
+            any(
+                handler.handler_module_path
+                == "astrbot.builtin_stars.builtin_commands.main"
+                for handler in help_handlers
+            )
+        )
+
+    async def test_query_defaults_to_competitive_even_with_legacy_leisure_config(self):
+        # A previously saved default mode must not change the command's meaning.
+        self.plugin.default_mode = "leisure"
+        await self.command(Event("查询 本人#1234"))
+        self.assertEqual(
+            self.plugin.api.calls[-1], ("rating", "competitive", ["本人#1234"])
+        )
+
+    async def test_leisure_command_uses_explicit_target_or_bound_self(self):
+        await self.command(Event("绑定 本人#1234"))
+        await self.command(Event("查询休闲 临时#5678"))
+        self.assertEqual(
+            self.plugin.api.calls[-1], ("rating", "leisure", ["临时#5678"])
+        )
+        await self.command(Event("查询休闲"))
+        self.assertEqual(
+            self.plugin.api.calls[-1], ("rating", "leisure", ["本人#1234"])
+        )
+        self.assertEqual(self.plugin.bindings.get("qq-a", "sender-a"), "本人#1234")
+
+    async def test_leisure_image_query_keeps_mode_for_same_message_and_followup(self):
+        picture = Image.fromFileSystem(str(self.image_path))
+        await self.command(Event("查询休闲", messages=[picture]))
+        self.assertEqual(
+            self.plugin.api.calls[-1], ("rating", "leisure", ["甲#1234", "乙#1234"])
+        )
+        await self.command(Event("查询休闲 图片"))
+        await self.command(Event("", messages=[picture]))
+        self.assertEqual(
+            self.plugin.api.calls[-1], ("rating", "leisure", ["甲#1234", "乙#1234"])
+        )
+
+    async def test_leisure_ocr_review_and_expiry_preserve_the_correction_command(self):
+        self.plugin.api.ocr["review_count"] = 1
+        picture = Image.fromFileSystem(str(self.image_path))
+        replies = await self.command(Event("查询休闲", messages=[picture]))
+        self.assertIn("重新输入 /查询休闲", replies[-1][1])
+        self.plugin.pending_images[("qq-a", "sender-a", "group-a")] = (
+            "leisure",
+            time.monotonic() - 1,
+        )
+        replies = await self.command(Event("", messages=[picture]))
+        self.assertIn("/查询休闲 图片", replies[-1][1])
 
     async def test_bound_query_returns_original_png_and_unbind_is_sender_scoped(self):
         await self.command(Event("绑定 本人＃1234"))

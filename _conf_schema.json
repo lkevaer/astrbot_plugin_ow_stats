@@ -12,12 +12,6 @@
     "secret": true,
     "hint": "填写战绩服务的 OW_SERVER_API_KEY。QQ AppSecret 仍在平台配置中管理。"
   },
-  "default_mode": {
-    "description": "默认查询模式",
-    "type": "string",
-    "default": "competitive",
-    "options": ["competitive", "leisure"]
-  },
   "timeout_seconds": {
     "description": "单批查询最长等待秒数",
     "type": "int",
