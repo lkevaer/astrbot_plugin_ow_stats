@@ -10,7 +10,7 @@ from pathlib import Path
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
-from astrbot.api.message_components import Image
+from astrbot.api.message_components import Image, Plain
 from astrbot.api.star import Context, Star
 from astrbot.core.star.filter.command import GreedyStr
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
@@ -144,7 +144,15 @@ class OWStatsPlugin(Star):
                 )
                 return
             picture = await self.renderer.render(report)
-            yield event.chain_result([Image.fromBytes(picture)])
+            chain = [Image.fromBytes(picture)]
+            if re.fullmatch(r"[0-9a-f]{32}", str(report.get("task_id") or "")):
+                chain.append(
+                    Plain(
+                        text="进入网页版查询当局所有人评分评级：https://lkevaer.xyz/?task="
+                        + report["task_id"]
+                    )
+                )
+            yield event.chain_result(chain)
         except ValueError as exc:
             yield event.plain_result(str(exc))
         except Exception as exc:
@@ -212,6 +220,55 @@ class OWStatsPlugin(Star):
         """Query recent leisure matches using a saved tag, explicit tags, or an image."""
         async for reply in self._query(event, args, mode="leisure"):
             yield reply
+
+    @filter.command("韩服数据")
+    async def hero_rates(self, event: AstrMessageEvent, args: GreedyStr):
+        """Return a complete Chinese hero statistics image for a fixed Korea preset."""
+        event.should_call_llm(False)
+        role = {"坦克": "tank", "输出": "damage", "辅助": "support"}.get(args.strip())
+        if role is None:
+            yield event.plain_result(
+                "用法：/韩服数据 坦克，或 /韩服数据 输出、/韩服数据 辅助。\n固定：韩服 · 大师 · 竞技职责预选 · 所有地图 · PC，按胜率排序，每24小时更新缓存。"
+            )
+            return
+        identity, acquired = None, False
+        try:
+            identity = self._identity(event)
+            if identity in self.busy:
+                yield event.plain_result("你上一条查询仍在运行，请等它完成。")
+                return
+            self.busy.add(identity)
+            acquired = True
+            selected = {
+                "role": role,
+                "rq": "2",
+                "rank": "master",
+                "map": "all",
+                "input": "pc",
+                "region": "korea",
+            }
+            yield event.plain_result(
+                f"正在读取韩服大师{args.strip()}数据缓存，将返回按胜率排序的完整中文数据图…"
+            )
+            report = await self.api.request("GET", "/api/hero-rates", params=selected)
+            if (
+                report.get("filters") != selected
+                or report.get("report_type") != "hero_rates"
+            ):
+                raise ValueError("统计筛选条件不匹配，未生成其他段位或地区的图片。")
+            if not report.get("heroes"):
+                yield event.plain_result("原站在这些筛选条件下暂无英雄数据。")
+                return
+            picture = await self.renderer.render(report)
+            yield event.chain_result([Image.fromBytes(picture)])
+        except ValueError as error:
+            yield event.plain_result(str(error))
+        except Exception as error:
+            logger.error("Hero statistics image failed: %s", type(error).__name__)
+            yield event.plain_result("韩服数据或图片生成暂时不可用，请稍后重试。")
+        finally:
+            if acquired:
+                self.busy.discard(identity)
 
     @filter.custom_filter(ScreenshotOnly)
     async def screenshot(self, event: AstrMessageEvent):

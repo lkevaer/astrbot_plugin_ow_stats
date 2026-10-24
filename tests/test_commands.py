@@ -79,6 +79,12 @@ class API:
 
     async def request(self, method, path, **kwargs):
         self.calls.append((method, path, kwargs))
+        if path == "/api/hero-rates":
+            return {
+                "report_type": "hero_rates",
+                "filters": kwargs["params"],
+                "heroes": [{"name": "国服英雄", "heroId": "winston"}],
+            }
         return self.ocr
 
     async def rating(self, mode, tags):
@@ -90,7 +96,11 @@ class API:
 
 
 class Renderer:
+    def __init__(self):
+        self.reports = []
+
     async def render(self, report):
+        self.reports.append(report)
         return PNG
 
     async def close(self):
@@ -115,6 +125,41 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         await self.plugin.terminate()
         self.folder.cleanup()
 
+    async def test_hero_statistics_roles_use_only_the_fixed_korea_master_preset(self):
+        await self.command(Event("绑定 本人#1234"))
+        for name, role in [("坦克", "tank"), ("输出", "damage"), ("辅助", "support")]:
+            event = Event("韩服数据 " + name)
+            replies = await self.command(event)
+            self.assertEqual(
+                self.plugin.api.calls[-1],
+                (
+                    "GET",
+                    "/api/hero-rates",
+                    {
+                        "params": {
+                            "role": role,
+                            "rq": "2",
+                            "rank": "master",
+                            "map": "all",
+                            "input": "pc",
+                            "region": "korea",
+                        }
+                    },
+                ),
+            )
+            self.assertIsInstance(replies[-1][1][0], Image)
+            self.assertEqual(
+                self.plugin.renderer.reports[-1]["report_type"], "hero_rates"
+            )
+            self.assertFalse(event.call_llm)
+        self.assertEqual(self.plugin.bindings.get("qq-a", "sender-a"), "本人#1234")
+
+    async def test_invalid_hero_statistics_role_gives_usage_without_querying(self):
+        for text in ["韩服数据", "韩服数据 全部", "韩服数据 坦克 宗师"]:
+            replies = await self.command(Event(text))
+            self.assertIn("用法", replies[-1][1])
+        self.assertEqual(self.plugin.api.calls, [])
+
     async def command(self, event):
         for handler in star_handlers_registry:
             if handler.handler_module_path == OWStatsPlugin.__module__ and all(
@@ -136,7 +181,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
             for f in handler.event_filters
             if isinstance(f, CommandFilter)
         }
-        self.assertEqual(commands, {"绑定", "解绑", "查询", "查询休闲", "help"})
+        self.assertEqual(commands, {"绑定", "解绑", "查询", "查询休闲", "韩服数据", "help"})
 
     async def test_help_aliases_list_commands_and_stop_duplicate_help(self):
         for command in ["help", "帮助"]:

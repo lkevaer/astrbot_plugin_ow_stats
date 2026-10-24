@@ -22,6 +22,7 @@ REPORT_PREPARE = """report => {
     render(report);
     document.querySelector('.inputs').closest('section').remove();
     document.querySelector('#selfBinding')?.remove();
+    document.querySelectorAll('.site-nav, .web-callout, .match-query-column').forEach(node => node.remove());
     document.querySelectorAll('main button').forEach(node => node.remove());
     document.querySelector('.sub').textContent = '近12场休闲或竞技表现 · 玩家逐场详情已展开';
     document.querySelectorAll('#details details').forEach(node => node.open = true);
@@ -43,7 +44,7 @@ REPORT_PREPARE = """report => {
     }
     const footer = document.createElement('footer');
     footer.id = 'botRulesFooter';
-    footer.textContent = '访问 lkevaer.xyz 查询完整评分规则';
+    footer.innerHTML = '<strong>访问 lkevaer.xyz</strong><span>进入网页版查询当局所有人评分评级</span><small>查询完整评分规则 · 展开每场详情，点击“查询当局”</small>';
     document.querySelector('main').append(footer);
     document.querySelectorAll('img[loading=lazy]').forEach(node => node.loading = 'eager');
 }"""
@@ -55,8 +56,34 @@ main { max-width: none; width: 1600px; margin: 0; padding-bottom: 28px; }
 .bot-summary { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px;
     border: 1px solid #536b89; border-radius: 9px; background: #101a2a;
     font-size: 15px; line-height: 1.9; }
-#botRulesFooter { margin-top: 24px; color: var(--muted); opacity: .8;
-    font-size: 13px; text-align: center; }
+#botRulesFooter { margin-top: 26px; padding: 24px; color: #f3d4a2;
+    border: 1px solid #9e7b42; border-radius: 12px; background: #242d3d; text-align: center; }
+#botRulesFooter strong { display: block; color: #ffd18b; font-size: 24px; }
+#botRulesFooter span { display: block; font-size: 18px; margin-top: 7px; }
+#botRulesFooter small { display: block; color: #aebbd0; margin-top: 7px; font-size: 13px; }
+*, *::before, *::after { animation: none !important; transition: none !important; }
+"""
+
+HERO_PREPARE = """report => {
+    renderHeroRates(report);
+    document.querySelector('.hero-nav')?.remove();
+    document.querySelector('#heroAccess')?.remove();
+    document.querySelectorAll('#heroFilters select').forEach(select => {
+        const value = document.createElement('span'); value.className = 'static-filter';
+        value.textContent = report.filter_labels[select.id]; select.replaceWith(value);
+    });
+    document.querySelectorAll('main button').forEach(button => {
+        const label = document.createElement('span'); label.innerHTML = button.innerHTML;
+        button.replaceWith(label);
+    });
+    document.querySelectorAll('img').forEach(image => image.loading = 'eager');
+}"""
+
+HERO_CSS = """
+main { width: 1400px; margin: 0; }
+.hero-board { padding: 0 32px 32px; margin: 35px 0 0; }
+.hero-filters { grid-template-columns: repeat(6, minmax(0,1fr)); }
+.hero-rate-table th > span { display: flex; gap: 10px; align-items: center; font-size: 17px; }
 *, *::before, *::after { animation: none !important; transition: none !important; }
 """
 
@@ -82,6 +109,8 @@ class WebRenderer:
             ValueError: The browser is unavailable or any report content is clipped.
         """
         async with self.lock:
+            hero_report = report.get("report_type") == "hero_rates"
+            minimum_width = 1400 if hero_report else 1600
             if self.browser is None or not self.browser.is_connected():
                 if self.driver is None:
                     self.driver = await async_playwright().start()
@@ -104,20 +133,28 @@ class WebRenderer:
                         "长图组件未就绪，请管理员安装 Chromium 和中文字体。"
                     ) from exc
             context = await self.browser.new_context(
-                viewport={"width": 1600, "height": 1000},
+                viewport={"width": minimum_width, "height": 1000},
                 device_scale_factor=2,
                 locale="zh-CN",
                 timezone_id="Asia/Shanghai",
                 service_workers="block",
             )
             try:
+                await context.add_init_script("window.__OW_STATIC_REPORT__ = true;")
                 assets = {
                     "/": (
                         "text/html",
                         re.sub(
                             r'<script\b[^>]*src="/static/(?:ocr_crop|batch_rating_ocr)\.js"[^>]*></script>',
                             "",
-                            (UI_PATH / "batch_rating.html").read_text(encoding="utf-8"),
+                            (
+                                UI_PATH
+                                / (
+                                    "hero_rates.html"
+                                    if hero_report
+                                    else "batch_rating.html"
+                                )
+                            ).read_text(encoding="utf-8"),
                         ),
                     ),
                     "/health": (
@@ -125,16 +162,21 @@ class WebRenderer:
                         json.dumps({"api_key_required": False}),
                     ),
                 }
-                for name in (
-                    "batch_rating.css",
-                    "rating_account.js",
-                    "batch_rating.js",
-                ):
+                names = (
+                    ("hero_rates.css", "hero_rates.js", "hero_rates_banner.png")
+                    if hero_report
+                    else ("batch_rating.css", "rating_account.js", "batch_rating.js")
+                )
+                for name in names:
                     assets["/static/" + name] = (
-                        "text/css"
+                        "image/png"
+                        if name.endswith(".png")
+                        else "text/css"
                         if name.endswith(".css")
                         else "application/javascript",
-                        (UI_PATH / name).read_text(encoding="utf-8"),
+                        (UI_PATH / name).read_bytes()
+                        if name.endswith(".png")
+                        else (UI_PATH / name).read_text(encoding="utf-8"),
                     )
 
                 async def serve(route):
@@ -160,19 +202,29 @@ class WebRenderer:
                 page = await context.new_page()
                 await page.goto(REPORT_ORIGIN + "/", wait_until="load", timeout=30000)
                 await page.wait_for_function(
-                    "typeof render === 'function'", timeout=15000
+                    "typeof renderHeroRates === 'function'"
+                    if hero_report
+                    else "typeof render === 'function'",
+                    timeout=15000,
                 )
-                await page.add_style_tag(content=REPORT_CSS)
-                await page.evaluate(REPORT_PREPARE, report)
+                await page.add_style_tag(
+                    content=HERO_CSS if hero_report else REPORT_CSS
+                )
+                await page.evaluate(
+                    HERO_PREPARE if hero_report else REPORT_PREPARE, report
+                )
                 # Measure every expanded table, including nested detail padding.
-                width = await page.evaluate("""() => {
+                width = await page.evaluate(
+                    """minimumWidth => {
                     const main = document.querySelector('main');
                     const left = main.getBoundingClientRect().left;
                     const padding = parseFloat(getComputedStyle(main).paddingRight);
-                    return Math.ceil(Math.max(1600, ...[...main.querySelectorAll('table')].map(
+                    return Math.ceil(Math.max(minimumWidth, ...[...main.querySelectorAll('table')].map(
                         table => table.getBoundingClientRect().right - left + padding + 32
                     )));
-                }""")
+                }""",
+                    minimum_width,
+                )
                 await page.set_viewport_size({"width": width, "height": 1000})
                 await page.add_style_tag(content=f"main {{ width: {width}px; }}")
                 await page.evaluate("""async () => {
@@ -183,8 +235,22 @@ class WebRenderer:
                         setTimeout(resolve, 5000);
                     })));
                 }""")
-                complete = await page.evaluate(
-                    """report => {
+                if hero_report:
+                    complete = await page.evaluate(
+                        """report => {
+                        const rows = [...document.querySelectorAll('#heroRateRows > tr')];
+                        const main = document.querySelector('main').getBoundingClientRect();
+                        return rows.length === report.heroes.length
+                            && rows.every(row => report.heroes.some(hero => hero.heroId === row.dataset.hero))
+                            && [...document.querySelectorAll('table')].every(table => table.getBoundingClientRect().right <= main.right - 10)
+                            && document.querySelectorAll('.static-filter').length === 6
+                            && !document.querySelector('main button, main select, main input');
+                    }""",
+                        report,
+                    )
+                else:
+                    complete = await page.evaluate(
+                        """report => {
                     const main = document.querySelector('main');
                     const bounds = main.getBoundingClientRect();
                     const details = [...document.querySelectorAll('#details > details')];
@@ -195,8 +261,8 @@ class WebRenderer:
                         && !document.querySelector('#scoringReference').open
                         && !main.querySelector('input, textarea, button, #selfBinding, .inputs');
                 }""",
-                    report,
-                )
+                        report,
+                    )
                 if not complete:
                     raise ValueError(
                         "网页结果未完整展开或仍有表格被裁切，本次未输出不完整图片。"
