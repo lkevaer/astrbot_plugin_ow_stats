@@ -2,6 +2,10 @@
 
 复用 [lkevaer/ow_stats_query](https://github.com/lkevaer/ow_stats_query) 的评分和 OCR 接口，提供独立 AstrBot 插件。无需大模型，支持 QQ 官方机器人 WebSocket、OneBot 和 AstrBot WebChat。
 
+## v2.5.0
+
+同步 v8 评分说明，辅助阵亡额外扣分已调轻；15分仅指该额外项的显示上限，原生存基础贡献另计。查询服务修复了无完整ID被误报成组件不可用的问题，增加启动预热、账号行批量复核、疑项准确模型重试和5分钟内存缓存；清晰名单提速，困难图片仍需核对。升级服务后重新查询即可使用新规则。
+
 ## 指令与作用
 
 群聊先 @机器人，再输入指令。
