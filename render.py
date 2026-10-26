@@ -10,6 +10,9 @@ import os
 import re
 import struct
 import zlib
+import hashlib
+import time
+from collections import OrderedDict
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -109,8 +112,39 @@ class WebRenderer:
         self.driver = None
         self.browser = None
         self.lock = asyncio.Lock()
+        self.pending = 0
+        self._images = OrderedDict()
 
     async def render(self, report: dict) -> bytes:
+        key = None
+        if report.get("report_type") == "hero_rates":
+            key = hashlib.sha256(json.dumps(report, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+            cached = self._images.get(key)
+            if cached and time.monotonic() - cached[0] < 21600:
+                self._images.move_to_end(key)
+                return cached[1]
+        if self.pending >= 2:
+            raise ValueError("长图生成繁忙，请稍后重试。")
+        self.pending += 1
+        try:
+            async with asyncio.timeout(120):
+                # The lock also coalesces a concurrent identical hero image.
+                async with self.lock:
+                    cached = self._images.get(key) if key else None
+                    if cached and time.monotonic() - cached[0] < 21600:
+                        return cached[1]
+                    png = await self._render_once(report)
+                    if key and len(png) <= 16 * 1024 * 1024:
+                        self._images[key] = (time.monotonic(), png)
+                        while len(self._images) > 3 or sum(len(value[1]) for value in self._images.values()) > 16 * 1024 * 1024:
+                            self._images.popitem(last=False)
+                    return png
+        except TimeoutError as exc:
+            raise ValueError("长图生成超时，请稍后重试。") from exc
+        finally:
+            self.pending -= 1
+
+    async def _render_once(self, report: dict) -> bytes:
         """Expand all player tables and capture the entire report at double density.
 
         Args:
@@ -122,194 +156,211 @@ class WebRenderer:
         Raises:
             ValueError: The browser is unavailable or any report content is clipped.
         """
-        async with self.lock:
-            hero_report = report.get("report_type") == "hero_rates"
-            minimum_width = 1400 if hero_report else 1600
-            if self.browser is None or not self.browser.is_connected():
-                if self.driver is None:
-                    self.driver = await async_playwright().start()
-                options = {"headless": True}
-                if os.name == "nt":
-                    edge = (
-                        Path(
-                            os.environ.get(
-                                "PROGRAMFILES(X86)", "C:/Program Files (x86)"
-                            )
+        hero_report = report.get("report_type") == "hero_rates"
+        minimum_width = 1400 if hero_report else 1600
+        if self.browser is None or not self.browser.is_connected():
+            if self.driver is None:
+                self.driver = await async_playwright().start()
+            options = {"headless": True}
+            if os.name == "nt":
+                edge = (
+                    Path(
+                        os.environ.get(
+                            "PROGRAMFILES(X86)", "C:/Program Files (x86)"
                         )
-                        / "Microsoft/Edge/Application/msedge.exe"
                     )
-                    if edge.exists():
-                        options["channel"] = "msedge"
-                try:
-                    self.browser = await self.driver.chromium.launch(**options)
-                except Exception as exc:
-                    raise ValueError(
-                        "长图组件未就绪，请管理员安装 Chromium 和中文字体。"
-                    ) from exc
-            context = await self.browser.new_context(
-                viewport={"width": minimum_width, "height": 1000},
-                device_scale_factor=2,
-                locale="zh-CN",
-                timezone_id="Asia/Shanghai",
-                service_workers="block",
-            )
-            try:
-                await context.add_init_script("window.__OW_STATIC_REPORT__ = true;")
-                assets = {
-                    "/": (
-                        "text/html",
-                        re.sub(
-                            r'<script\b[^>]*src="/static/(?:ocr_crop|batch_rating_ocr)\.js"[^>]*></script>',
-                            "",
-                            (
-                                UI_PATH
-                                / (
-                                    "hero_rates.html"
-                                    if hero_report
-                                    else "batch_rating.html"
-                                )
-                            ).read_text(encoding="utf-8"),
-                        ),
-                    ),
-                    "/health": (
-                        "application/json",
-                        json.dumps({"api_key_required": False}),
-                    ),
-                }
-                names = (
-                    ("hero_rates.css", "hero_rates.js", "hero_rates_banner.png")
-                    if hero_report
-                    else ("batch_rating.css", "rating_account.js", "batch_rating.js")
+                    / "Microsoft/Edge/Application/msedge.exe"
                 )
-                for name in names:
-                    assets["/static/" + name] = (
-                        "image/png"
-                        if name.endswith(".png")
-                        else "text/css"
-                        if name.endswith(".css")
-                        else "application/javascript",
-                        (UI_PATH / name).read_bytes()
-                        if name.endswith(".png")
-                        else (UI_PATH / name).read_text(encoding="utf-8"),
-                    )
+                if edge.exists():
+                    options["channel"] = "msedge"
+            try:
+                self.browser = await self.driver.chromium.launch(**options)
+            except Exception as exc:
+                raise ValueError(
+                    "长图组件未就绪，请管理员安装 Chromium 和中文字体。"
+                ) from exc
+        context = await self.browser.new_context(
+            viewport={"width": minimum_width, "height": 1000},
+            device_scale_factor=2,
+            locale="zh-CN",
+            timezone_id="Asia/Shanghai",
+            service_workers="block",
+        )
+        try:
+            await context.add_init_script("window.__OW_STATIC_REPORT__ = true;")
+            assets = {
+                "/": (
+                    "text/html",
+                    re.sub(
+                        r'<script\b[^>]*src="/static/(?:ocr_crop|batch_rating_ocr)\.js"[^>]*></script>',
+                        "",
+                        (
+                            UI_PATH
+                            / (
+                                "hero_rates.html"
+                                if hero_report
+                                else "batch_rating.html"
+                            )
+                        ).read_text(encoding="utf-8"),
+                    ),
+                ),
+                "/health": (
+                    "application/json",
+                    json.dumps({"api_key_required": False}),
+                ),
+            }
+            names = (
+                ("game_assets.js", "hero_rates.css", "hero_rates.js", "hero_rates_banner.png")
+                if hero_report
+                else ("game_assets.js", "batch_rating.css", "rating_account.js", "batch_rating.js")
+            )
+            for name in names:
+                assets["/static/" + name] = (
+                    "image/png"
+                    if name.endswith(".png")
+                    else "text/css"
+                    if name.endswith(".css")
+                    else "application/javascript",
+                    (UI_PATH / name).read_bytes()
+                    if name.endswith(".png")
+                    else (UI_PATH / name).read_text(encoding="utf-8"),
+                )
 
-                async def serve(route):
-                    request = route.request
-                    url = urlsplit(request.url)
-                    if (
-                        url.scheme + "://" + url.netloc == REPORT_ORIGIN
-                        and url.path in assets
-                    ):
-                        content_type, body = assets[url.path]
-                        await route.fulfill(
-                            status=200, content_type=content_type, body=body
-                        )
-                    elif request.resource_type == "image" and url.scheme in {
-                        "https",
-                        "http",
-                    }:
-                        await route.continue_()
+            async def serve(route):
+                request = route.request
+                url = urlsplit(request.url)
+                if (
+                    url.scheme + "://" + url.netloc == REPORT_ORIGIN
+                    and url.path in assets
+                ):
+                    content_type, body = assets[url.path]
+                    await route.fulfill(
+                        status=200, content_type=content_type, body=body
+                    )
+                elif (url.scheme + "://" + url.netloc == REPORT_ORIGIN
+                      and url.path.startswith("/static/game-icons/")):
+                    asset = (UI_PATH / url.path.removeprefix("/static/")).resolve()
+                    if asset.is_relative_to((UI_PATH / "game-icons").resolve()) and asset.is_file() and asset.suffix in {".webp", ".svg"}:
+                        await route.fulfill(body=asset.read_bytes(), content_type="image/webp" if asset.suffix == ".webp" else "image/svg+xml")
                     else:
                         await route.abort()
-
-                await context.route("**/*", serve)
-                page = await context.new_page()
-                await page.goto(REPORT_ORIGIN + "/", wait_until="load", timeout=30000)
-                await page.wait_for_function(
-                    "typeof renderHeroRates === 'function'"
-                    if hero_report
-                    else "typeof render === 'function'",
-                    timeout=15000,
-                )
-                await page.add_style_tag(
-                    content=HERO_CSS if hero_report else REPORT_CSS
-                )
-                await page.evaluate(
-                    HERO_PREPARE if hero_report else REPORT_PREPARE, report
-                )
-                # Measure every expanded table, including nested detail padding.
-                width = await page.evaluate(
-                    """minimumWidth => {
-                    const main = document.querySelector('main');
-                    const left = main.getBoundingClientRect().left;
-                    const padding = parseFloat(getComputedStyle(main).paddingRight);
-                    return Math.ceil(Math.max(minimumWidth, ...[...main.querySelectorAll('table')].map(
-                        table => table.getBoundingClientRect().right - left + padding + 32
-                    )));
-                }""",
-                    minimum_width,
-                )
-                await page.set_viewport_size({"width": width, "height": 1000})
-                await page.add_style_tag(content=f"main {{ width: {width}px; }}")
-                await page.evaluate("""async () => {
-                    await document.fonts.ready;
-                    await Promise.all([...document.images].map(img => img.complete ? Promise.resolve() : new Promise(resolve => {
-                        img.addEventListener('load', resolve, {once:true});
-                        img.addEventListener('error', resolve, {once:true});
-                        setTimeout(resolve, 5000);
-                    })));
-                }""")
-                if hero_report:
-                    complete = await page.evaluate(
-                        """report => {
-                        const rows = [...document.querySelectorAll('#heroRateRows > tr')];
-                        const main = document.querySelector('main').getBoundingClientRect();
-                        return rows.length === report.heroes.length
-                            && rows.every(row => report.heroes.some(hero => hero.heroId === row.dataset.hero))
-                            && [...document.querySelectorAll('table')].every(table => table.getBoundingClientRect().right <= main.right - 10)
-                            && document.querySelectorAll('.static-filter').length === 6
-                            && !document.querySelector('main button, main select, main input');
-                    }""",
-                        report,
-                    )
                 else:
-                    complete = await page.evaluate(
-                        """report => {
-                    const main = document.querySelector('main');
-                    const bounds = main.getBoundingClientRect();
-                    const details = [...document.querySelectorAll('#details > details')];
-                    return document.querySelectorAll('#rankings > tr').length === report.players.length
-                        && details.length === report.players.length && details.every(node => node.open)
-                        && document.querySelectorAll('#details tbody > tr').length === report.players.reduce((n,p) => n + p.matches.length, 0)
-                        && [...main.querySelectorAll('table')].every(table => table.getBoundingClientRect().right <= bounds.right - 10)
-                        && !document.querySelector('#scoringReference').open
-                        && !main.querySelector('input, textarea, button, #selfBinding, .inputs');
-                }""",
-                        report,
-                    )
-                if not complete:
-                    raise ValueError(
-                        "网页结果未完整展开或仍有表格被裁切，本次未输出不完整图片。"
-                    )
-                bounds = await page.locator("main").bounding_box()
-                height = math.ceil(bounds["height"])
-                await page.add_style_tag(
-                    content=f"body {{ min-height: {height + 2}px; }}"
-                )
-                tiles = []
-                # Large GPU textures can wrap at 16384 physical pixels on Windows.
-                # Capture short viewports and join their original pixels instead.
-                for offset in range(0, height, 2000):
-                    tile_height = min(2000, height - offset)
-                    await page.set_viewport_size(
-                        {"width": width, "height": tile_height}
-                    )
-                    await page.evaluate("y => window.scrollTo(0, y)", offset)
-                    position = await page.evaluate("window.scrollY")
-                    if abs(position - offset) > 0.1:
-                        raise ValueError("长图分段位置异常，本次未输出不完整图片。")
-                    tiles.append(
-                        await page.screenshot(
-                            type="png",
-                            animations="disabled",
-                            timeout=60000,
-                        )
-                    )
-            finally:
-                await context.close()
-            return await asyncio.to_thread(
-                self._join_tiles, tiles, width * 2, height * 2
+                    await route.abort()
+
+            await context.route("**/*", serve)
+            page = await context.new_page()
+            await page.goto(REPORT_ORIGIN + "/", wait_until="load", timeout=30000)
+            await page.wait_for_function(
+                "typeof renderHeroRates === 'function'"
+                if hero_report
+                else "typeof render === 'function'",
+                timeout=15000,
             )
+            await page.add_style_tag(
+                content=HERO_CSS if hero_report else REPORT_CSS
+            )
+            await page.evaluate(
+                HERO_PREPARE if hero_report else REPORT_PREPARE, report
+            )
+            # Measure every expanded table, including nested detail padding.
+            width = await page.evaluate(
+                """minimumWidth => {
+                const main = document.querySelector('main');
+                const left = main.getBoundingClientRect().left;
+                const padding = parseFloat(getComputedStyle(main).paddingRight);
+                return Math.ceil(Math.max(minimumWidth, ...[...main.querySelectorAll('table')].map(
+                    table => table.getBoundingClientRect().right - left + padding + 32
+                )));
+            }""",
+                minimum_width,
+            )
+            await page.set_viewport_size({"width": width, "height": 1000})
+            await page.add_style_tag(content=f"main {{ width: {width}px; }}")
+            await page.evaluate("""async () => {
+                await document.fonts.ready;
+                await Promise.all([...document.images].map(img => img.complete ? Promise.resolve() : new Promise(resolve => {
+                    img.addEventListener('load', resolve, {once:true});
+                    img.addEventListener('error', resolve, {once:true});
+                    setTimeout(resolve, 5000);
+                })));
+            }""")
+            await page.wait_for_function(
+                "[...document.images].every(image => image.complete && image.naturalWidth > 0)",
+                timeout=10000,
+            )
+            if hero_report:
+                complete = await page.evaluate(
+                    """report => {
+                    const rows = [...document.querySelectorAll('#heroRateRows > tr')];
+                    const main = document.querySelector('main').getBoundingClientRect();
+                    return rows.length === report.heroes.length
+                        && rows.every(row => report.heroes.some(hero => hero.heroId === row.dataset.hero))
+                        && [...document.querySelectorAll('table')].every(table => table.getBoundingClientRect().right <= main.right - 10)
+                        && document.querySelectorAll('.static-filter').length === 6
+                        && !document.querySelector('main button, main select, main input');
+                }""",
+                    report,
+                )
+            else:
+                complete = await page.evaluate(
+                    """report => {
+                const main = document.querySelector('main');
+                const bounds = main.getBoundingClientRect();
+                const details = [...document.querySelectorAll('#details > details')];
+                return document.querySelectorAll('#rankings > tr').length === report.players.length
+                    && details.length === report.players.length && details.every(node => node.open)
+                    && document.querySelectorAll('#details tbody > tr').length === report.players.reduce((n,p) => n + p.matches.length, 0)
+                    && [...main.querySelectorAll('table')].every(table => table.getBoundingClientRect().right <= bounds.right - 10)
+                    && !document.querySelector('#scoringReference').open
+                    && !main.querySelector('input, textarea, button, #selfBinding, .inputs');
+            }""",
+                    report,
+                )
+            if not complete:
+                raise ValueError(
+                    "网页结果未完整展开或仍有表格被裁切，本次未输出不完整图片。"
+                )
+            bounds = await page.locator("main").bounding_box()
+            height = math.ceil(bounds["height"])
+            await page.add_style_tag(
+                content=f"body {{ min-height: {height + 2}px; }}"
+            )
+            tiles = []
+            # Large GPU textures can wrap at 16384 physical pixels on Windows.
+            # Capture short viewports and join their original pixels instead.
+            for offset in range(0, height, 2000):
+                tile_height = min(2000, height - offset)
+                await page.set_viewport_size(
+                    {"width": width, "height": tile_height}
+                )
+                await page.evaluate("y => window.scrollTo(0, y)", offset)
+                position = await page.evaluate("window.scrollY")
+                if abs(position - offset) > 0.1:
+                    raise ValueError("长图分段位置异常，本次未输出不完整图片。")
+                tiles.append(
+                    await page.screenshot(
+                        type="png",
+                        animations="disabled",
+                        timeout=60000,
+                    )
+                )
+        finally:
+            await context.close()
+        # Compression is native work too: retain admission on cancellation.
+        task = asyncio.create_task(asyncio.to_thread(self._join_tiles, tiles, width * 2, height * 2))
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            if not task.cancelled():
+                task.exception()
+            raise
 
     @staticmethod
     def _join_tiles(tiles: list[bytes], width: int, height: int) -> bytes:
@@ -341,7 +392,7 @@ class WebRenderer:
         offset = 0
         # Encode one tile at a time instead of allocating a full-height canvas.
         for tile in tiles:
-            with Image.open(io.BytesIO(tile)) as source:
+            with Image.open(io.BytesIO(tile), formats=("PNG",)) as source:
                 if source.width != width or offset + source.height > height:
                     raise ValueError("长图分段尺寸异常，本次未输出不完整图片。")
                 with source.convert("RGB") as image:
@@ -367,3 +418,4 @@ class WebRenderer:
             if self.driver is not None:
                 await self.driver.stop()
             self.browser = self.driver = None
+            self._images.clear()

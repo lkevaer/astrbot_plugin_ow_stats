@@ -2,7 +2,7 @@
 
 复用 [lkevaer/ow_stats_query](https://github.com/lkevaer/ow_stats_query) 的评分和 OCR 接口，提供独立 AstrBot 插件。无需大模型，支持 QQ 官方机器人 WebSocket、OneBot 和 AstrBot WebChat。
 
-## v2.5.0
+## 评分与识别
 
 同步 v8 评分说明，辅助阵亡额外扣分已调轻；15分仅指该额外项的显示上限，原生存基础贡献另计。查询服务修复了无完整ID被误报成组件不可用的问题，增加启动预热、账号行批量复核、疑项准确模型重试和5分钟内存缓存；清晰名单提速，困难图片仍需核对。升级服务后重新查询即可使用新规则。
 
@@ -53,7 +53,7 @@
 2. 在插件管理中从本仓库安装，或将本仓库放到 `AstrBot/data/plugins/astrbot_plugin_ow_stats`。
 3. 使用 AstrBot 的 Python 安装依赖：`python -m pip install -r requirements.txt`。
 4. Linux 运行 `python -m playwright install --with-deps chromium`，并安装 `fonts-noto-cjk`；Windows 可复用 Edge，或运行 `python -m playwright install chromium`。
-5. 插件设置的 `api_url` 默认 `https://lkevaer.xyz`。服务要求访问码时，填写其 `OW_SERVER_API_KEY`。QQ AppID/AppSecret 仍在 AstrBot 的平台配置中设置。
+5. 插件设置的 `api_url` 默认 `https://lkevaer.xyz`。新版后端请将插件`service_key`与私有环境变量`OW_BOT_API_KEY`设置为同一独立随机密钥；旧版访问码兼容配置见部署说明。QQ AppID/AppSecret 仍在 AstrBot 的平台配置中设置。
 6. 重新加载插件后，在测试会话发送 `/帮助` 查看用法，再测试绑定和两种查询模式。
 
 服务器部署、数据迁移和容器方案见 [DEPLOYMENT.md](DEPLOYMENT.md)。仓库不包含账号凭据或绑定数据库。

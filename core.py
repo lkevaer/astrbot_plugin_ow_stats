@@ -7,6 +7,7 @@ import re
 import sqlite3
 import time
 import unicodedata
+import hashlib
 from contextlib import closing
 from pathlib import Path
 
@@ -129,11 +130,12 @@ class OWClient:
     """Call the existing service without duplicating its scoring algorithm."""
 
     def __init__(
-        self, base_url: str, api_key: str = "", timeout: int = 300, transport=None
+        self, base_url: str, api_key: str = "", timeout: int = 300, transport=None, *, service_key: str = ""
     ):
         if not base_url.startswith(("http://", "https://")):
             raise ValueError("战绩服务地址必须以 http:// 或 https:// 开头。")
         self.timeout = max(30, min(int(timeout), 900))
+        self.service_key = service_key
         self.client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             headers={"X-API-Key": api_key} if api_key else {},
@@ -142,9 +144,23 @@ class OWClient:
             transport=transport,
         )
 
-    async def request(self, method: str, path: str, **kwargs) -> dict:
+    def actor_headers(self, actor):
+        if not self.service_key:
+            return {}
+        if actor is None or len(actor) != 3 or not all(actor):
+            raise ValueError("无法确认查询用户，请重新发送指令。")
+        platform, sender, group = map(str, actor)
+        def digest(parts):
+            return hashlib.sha256("\0".join(parts).encode()).hexdigest()
+        return {"X-Bot-Key": self.service_key,
+                "X-Bot-User": digest([platform, sender]),
+                "X-Bot-Group": digest([platform, group])}
+
+    async def request(self, method: str, path: str, *, actor=None, **kwargs) -> dict:
+        headers = dict(kwargs.pop("headers", {}) or {})
+        headers.update(self.actor_headers(actor))
         try:
-            response = await self.client.request(method, path, **kwargs)
+            response = await self.client.request(method, path, headers=headers, **kwargs)
         except httpx.TimeoutException as exc:
             raise ValueError("战绩查询等待超时，请稍后重试。") from exc
         except httpx.HTTPError as exc:
@@ -153,9 +169,15 @@ class OWClient:
             raise ValueError("战绩服务访问码不正确，请在插件设置中更新。")
         if response.is_error:
             try:
-                message = response.json().get("detail") or "查询失败"
+                payload = response.json()
+                message = payload.get("error") or payload.get("detail") or "查询失败"
+                if not isinstance(message, str):
+                    message = "请求参数有误，请检查指令和截图"
             except (ValueError, AttributeError):
                 message = "查询失败"
+            retry = response.headers.get("Retry-After", "")
+            if response.status_code in {429, 503} and retry.isdigit() and "秒" not in message:
+                message += f"，请在{min(int(retry), 900)}秒后重试"
             raise ValueError(f"战绩服务：{str(message)[:180]}")
         payload = response.json()
         if payload.get("success") is False:
@@ -163,15 +185,24 @@ class OWClient:
         return payload.get("data", payload)
 
     async def rating(
-        self, mode: str, tags: list[str], poll_interval: float = 2
+        self, mode: str, tags: list[str], poll_interval: float = 2, *, actor=None
     ) -> dict:
         if mode not in {"competitive", "leisure"}:
             raise ValueError("查询模式必须是竞技或休闲。")
         tags = team_tags(tags, None)
+        # Include admission + HTTP time + polling in a single client budget.
+        try:
+            async with asyncio.timeout(self.timeout):
+                return await self._rating(mode, tags, poll_interval, actor)
+        except TimeoutError as exc:
+            raise ValueError("战绩查询等待超时，请稍后重试；未用空数据生成评分。") from exc
+
+    async def _rating(self, mode, tags, poll_interval, actor):
         job = await self.request(
             "POST",
             f"/api/batch-rating/{mode}",
             json={"battletags": tags, "wait": False},
+            actor=actor,
         )
         task_id = job.get("task_id")
         if job.get("status") in {"queued", "running"} and not re.fullmatch(
@@ -183,7 +214,7 @@ class OWClient:
             if time.monotonic() >= deadline:
                 raise ValueError("战绩查询等待超时，请稍后重试；未用空数据生成评分。")
             await asyncio.sleep(poll_interval)
-            job = await self.request("GET", f"/api/batch-rating/tasks/{task_id}")
+            job = await self.request("GET", f"/api/batch-rating/tasks/{task_id}", actor=actor)
         if job.get("status") == "error":
             raise ValueError(str(job.get("error") or "战绩查询失败")[:180])
         if job.get("status") != "done" or not isinstance(job.get("result"), dict):
@@ -192,3 +223,23 @@ class OWClient:
 
     async def close(self):
         await self.client.aclose()
+
+
+class QueryGate:
+    """Bound in-flight work before downloading screenshots or fetching reports."""
+
+    def __init__(self, capacity=4, per_group=2):
+        self.capacity, self.per_group = capacity, per_group
+        self.active = {}
+
+    def enter(self, identity, group):
+        if identity in self.active:
+            raise ValueError("你上一条查询仍在运行，请等它完成。")
+        if len(self.active) >= self.capacity:
+            raise ValueError("机器人查询繁忙，请稍后重试。")
+        if sum(value == group for value in self.active.values()) >= self.per_group:
+            raise ValueError("本群已有多条查询正在处理，请稍后重试。")
+        self.active[identity] = group
+
+    def leave(self, identity):
+        self.active.pop(identity, None)

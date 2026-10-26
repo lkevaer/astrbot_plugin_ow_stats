@@ -1,20 +1,7 @@
 # 网页界面快照
 
-以下文件取自 `lkevaer/ow_stats_query` 的 `api_server/static/`，提交为 [`dbb739c0873bc5ce9828216530a94ed9957b1e7b`](https://github.com/lkevaer/ow_stats_query/commit/dbb739c0873bc5ce9828216530a94ed9957b1e7b)。
+UI及英雄、地图、段位本地图标取自 [lkevaer/ow_stats_query](https://github.com/lkevaer/ow_stats_query/commit/0bd3d028a71d72d2c59b5c5f9671636c9f9b412b) 的 `api_server/static/`。全部文件和SHA-256见 [MANIFEST.json](MANIFEST.json)，自动检查验证资源完整性。
 
-| 文件 | Git blob SHA |
-| --- | --- |
-| `batch_rating.html` | `eca329edd4ec5134b59160ab8e83be6abec9766d` |
-| `batch_rating.css` | `e001fbc0893fe1bcca030a6c1b2f980f7e6e971d` |
-| `batch_rating.js` | `992cd69783a458a8dbabbbe473f513b74b3e6bc2` |
-| `rating_account.js` | `6569ad7469750f71c31981b61171c08bdab0c10e` |
-| `hero_rates.html` | `747fc416d6523ba1cca7cff486d849766790f7ef` |
-| `hero_rates.css` | `312da9760b71dea323501450fefa6038ce0b4e32` |
-| `hero_rates.js` | `70ea2014065f957067f83847990a2aa0f3cc327b` |
-| `hero_rates_banner.png` | `0db867f896c8b05b4ba5d55600d409efe74b8c63` |
+机器人专用处理集中在 `render.py`：移除输入、排序、查询当局和全员子表操作，仅展开查询玩家的逐场战绩，规则保持折叠。评分仍由后端计算；长图没有新增网页子表。图片仅从固定同源UI资源读取，英雄、地图、段位均有默认图兜底。
 
-机器人专用调整集中在 `render.py`：数值与排序表头转为静态文字，保留完整的对齐数值、段位/胜负与地图布局；移除网页操作按钮、评分提示及全员子表，仅展开查询玩家原有战绩。页脚和消息均使用 HTTPS 网页入口。韩服统计采用静态筛选说明，禁用行与数据条动画。这里只渲染服务返回的数据，不复制后端评分算法或每次抓取原站。
-
-英雄统计数据与横幅来自 [Nexon 官方页面](https://overwatch.nexon.com/hero/rate)，国服名称对应 [国服官网英雄配置](https://ld5.res.netease.com/pc/zt/20241115153332/static/heroConfigs.json)。原项目采用 GPL-3.0，本仓库保留相同许可证及来源声明。
-
-本轮同步 v8 评分说明：辅助额外阵亡扣分已调轻，15分仅为该额外项的显示上限；生存基础项另计。评分与图片识别仍统一由查询服务执行。
+统计来源为 [Nexon官方](https://overwatch.nexon.com/hero/rate)，国服名称来源为国服官方英雄配置。游戏素材的权利不因代码采用GPL-3.0而改变，来源说明见网页仓库 `THIRD_PARTY.md`。

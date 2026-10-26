@@ -16,5 +16,12 @@
     "description": "单批查询最长等待秒数",
     "type": "int",
     "default": 300
+  },
+  "service_key": {
+    "description": "独立机器人服务凭据",
+    "type": "string",
+    "default": "",
+    "secret": true,
+    "hint": "与后端 OW_BOT_API_KEY 保持一致，独立于网页访问码和管理员密钥；仅保存在机器人服务端。"
   }
 }

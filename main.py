@@ -15,7 +15,7 @@ from astrbot.api.star import Context, Star
 from astrbot.core.star.filter.command import GreedyStr
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
-from .core import HELP, Bindings, OWClient, parse_tags, team_tags
+from .core import HELP, Bindings, OWClient, QueryGate, parse_tags, team_tags
 from .render import WebRenderer
 
 
@@ -41,9 +41,11 @@ class OWStatsPlugin(Star):
             config.get("api_url", "https://lkevaer.xyz"),
             config.get("api_key", ""),
             config.get("timeout_seconds", 300),
+            service_key=config.get("service_key", ""),
         )
         self.renderer = WebRenderer()
         self.busy: set[tuple[str, str]] = set()
+        self.gate = QueryGate()
         self.pending_images: dict[tuple[str, str, str], tuple[str, float]] = {}
 
     def _identity(self, event):
@@ -55,6 +57,11 @@ class OWStatsPlugin(Star):
 
     def _conversation(self, event):
         return (*self._identity(event), str(event.get_session_id()))
+
+    def _actor(self, event):
+        platform, sender = self._identity(event)
+        group = str(event.get_group_id() or "private:" + sender)
+        return platform, sender, group
 
     async def _image_tags(self, event, command):
         """Pass a single bounded image to the service's existing OCR pipeline.
@@ -80,6 +87,7 @@ class OWStatsPlugin(Star):
             "POST",
             "/api/batch-rating/recognize",
             json={"image_base64": base64.b64encode(image_data).decode()},
+            actor=self._actor(event),
         )
         tags = parse_tags(" ".join(recognized.get("battletags", [])))
         if not tags:
@@ -101,6 +109,7 @@ class OWStatsPlugin(Star):
             if identity in self.busy:
                 yield event.plain_result("你上一条查询仍在运行，请等它完成。")
                 return
+            self.gate.enter(identity, self._actor(event)[::2])
             self.busy.add(identity)
             acquired = True
             command = "/查询休闲" if mode == "leisure" else "/查询"
@@ -120,6 +129,8 @@ class OWStatsPlugin(Star):
                     for key, value in self.pending_images.items()
                     if value[1] > now
                 }
+                if len(self.pending_images) >= 128:
+                    self.pending_images.pop(next(iter(self.pending_images)))
                 self.pending_images[self._conversation(event)] = (mode, now + 120)
                 yield event.plain_result(
                     f"请在2分钟内发送一张名单截图（群聊需@我），或发送 {command} 昵称#12345。\n"
@@ -137,7 +148,7 @@ class OWStatsPlugin(Star):
             yield event.plain_result(
                 f"正在查询{'竞技' if mode == 'competitive' else '休闲'}近12场，共{len(tags)}人；将返回展开详情的高清长图…"
             )
-            report = await self.api.rating(mode, tags)
+            report = await self.api.rating(mode, tags, actor=self._actor(event))
             if not report.get("players"):
                 yield event.plain_result(
                     "本次没有可展示的公开对局，请确认ID和战绩隐私设置。"
@@ -163,6 +174,7 @@ class OWStatsPlugin(Star):
         finally:
             if acquired:
                 self.busy.discard(identity)
+                self.gate.leave(identity)
 
     @filter.command("绑定")
     async def bind(self, event: AstrMessageEvent, args: GreedyStr):
@@ -237,6 +249,7 @@ class OWStatsPlugin(Star):
             if identity in self.busy:
                 yield event.plain_result("你上一条查询仍在运行，请等它完成。")
                 return
+            self.gate.enter(identity, self._actor(event)[::2])
             self.busy.add(identity)
             acquired = True
             selected = {
@@ -250,7 +263,7 @@ class OWStatsPlugin(Star):
             yield event.plain_result(
                 f"正在读取韩服大师{args.strip()}数据缓存，将返回按胜率排序的完整中文数据图…"
             )
-            report = await self.api.request("GET", "/api/hero-rates", params=selected)
+            report = await self.api.request("GET", "/api/hero-rates", params=selected, actor=self._actor(event))
             if (
                 report.get("filters") != selected
                 or report.get("report_type") != "hero_rates"
@@ -277,6 +290,7 @@ class OWStatsPlugin(Star):
         finally:
             if acquired:
                 self.busy.discard(identity)
+                self.gate.leave(identity)
 
     @filter.custom_filter(ScreenshotOnly)
     async def screenshot(self, event: AstrMessageEvent):

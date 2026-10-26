@@ -47,6 +47,9 @@ class Event:
     def get_session_id(self):
         return self.session
 
+    def get_group_id(self):
+        return self.session
+
     def get_message_str(self):
         return self.text
 
@@ -87,7 +90,8 @@ class API:
             }
         return self.ocr
 
-    async def rating(self, mode, tags):
+    async def rating(self, mode, tags, *, actor=None):
+        assert actor and len(actor) == 3
         self.calls.append(("rating", mode, tags))
         return {"players": [{"battletag": tag} for tag in tags]}
 
@@ -136,6 +140,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
                     "GET",
                     "/api/hero-rates",
                     {
+                        "actor": ("qq-a", "sender-a", "group-a"),
                         "params": {
                             "role": role,
                             "rq": "2",
