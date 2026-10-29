@@ -1,10 +1,10 @@
 {
   "repository": "lkevaer/ow_stats_query",
-  "commit": "0bd3d028a71d72d2c59b5c5f9671636c9f9b412b",
+  "commit": "a4583252500c557dbe91fa9a882b043a136bcd9e",
   "sha256": {
-    "batch_rating.css": "c9b7d31de4e6bd69b3c9481553d1f7097e52b16ff1f0da644031b22fc4d83eff",
-    "batch_rating.html": "27fd1ce468677c3bff211cd01835aaee7feef98ec50b9bdc2a9133bde7c41276",
-    "batch_rating.js": "95e435de2f81fda86fd351a8ae9cbc5ce8aacc0e1cb3942852008da16a1a60f9",
+    "batch_rating.css": "e44f207e97d9067782de1bc6721b78904f3a0cf9d07356c88ebd1e27fe3c4d1b",
+    "batch_rating.html": "5399f50c1acfa74c0f2fd6b227e3a629fe0a4fec34ea07e15d4475b87bd1143e",
+    "batch_rating.js": "9a3294b920a1bf7dcd4b3212e836aa758fd10a539ad4703e539001c2409f7ca3",
     "game-icons/hero-default.svg": "4f0514695e05e89008c393b3c43870fc244045fffd5db1022655d549cfb5ddf0",
     "game-icons/heroes/011a36d8584b838e1c95.webp": "0e1dac63404c8030c7205ac2f785def71cb45c6be86b5b35ee1789032d65b2fd",
     "game-icons/heroes/0c4fa7d499e097d2b9c2.webp": "ce93a04ea14c86f1386c92141c8b5595b1ae34d04f2c89d26691c89e0721f359",

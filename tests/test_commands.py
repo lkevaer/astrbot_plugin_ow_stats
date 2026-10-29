@@ -93,7 +93,7 @@ class API:
     async def rating(self, mode, tags, *, actor=None):
         assert actor and len(actor) == 3
         self.calls.append(("rating", mode, tags))
-        return {"players": [{"battletag": tag} for tag in tags]}
+        return {"players": [{"battletag": tag, "score": 80} for tag in tags]}
 
     async def close(self):
         pass
@@ -112,6 +112,21 @@ class Renderer:
 
 
 class CommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_empty_rating_data_replies_with_advice_without_rendering_a_blank_image(self):
+        for report in ({"players": []}, {"players": [{"score": None}]}):
+            with self.subTest(report=report):
+                self.plugin.api.rating = AsyncMock(return_value=report)
+                replies = await self.command(Event("查询 测试#1234"))
+                self.assertIn("网易大神搜索接口维护中或服务器异常", replies[-1][1])
+                self.assertIn("建议部署到本地查询", replies[-1][1])
+                self.assertEqual(self.plugin.renderer.reports, [])
+
+    async def test_successful_query_keeps_the_contribution_reminder_next_to_the_image(self):
+        from ..core import CONTRIBUTION_NOTICE
+        replies = await self.command(Event("查询 测试#1234"))
+        self.assertEqual(replies[-1][0], "chain")
+        self.assertTrue(any(getattr(item, "text", "") == CONTRIBUTION_NOTICE for item in replies[-1][1]))
+
     async def asyncSetUp(self):
         self.folder = tempfile.TemporaryDirectory()
         with patch(
@@ -167,7 +182,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_rating_image_has_a_separate_clickable_https_result_link(self):
         task_id = "a" * 32
         self.plugin.api.rating = AsyncMock(
-            return_value={"players": [{"battletag": "测试#1234"}], "task_id": task_id}
+            return_value={"players": [{"battletag": "测试#1234", "score": 80}], "task_id": task_id}
         )
         replies = await self.command(Event("查询 测试#1234"))
         self.assertIsInstance(replies[-1][1][0], Image)

@@ -15,7 +15,7 @@ from astrbot.api.star import Context, Star
 from astrbot.core.star.filter.command import GreedyStr
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
-from .core import HELP, Bindings, OWClient, QueryGate, parse_tags, team_tags
+from .core import CONTRIBUTION_NOTICE, EMPTY_QUERY_NOTICE, HELP, Bindings, OWClient, QueryGate, has_rated_players, parse_tags, team_tags
 from .render import WebRenderer
 
 
@@ -149,10 +149,8 @@ class OWStatsPlugin(Star):
                 f"正在查询{'竞技' if mode == 'competitive' else '休闲'}近12场，共{len(tags)}人；将返回展开详情的高清长图…"
             )
             report = await self.api.rating(mode, tags, actor=self._actor(event))
-            if not report.get("players"):
-                yield event.plain_result(
-                    "本次没有可展示的公开对局，请确认ID和战绩隐私设置。"
-                )
+            if not has_rated_players(report):
+                yield event.plain_result(EMPTY_QUERY_NOTICE)
                 return
             picture = await self.renderer.render(report)
             chain = [Image.fromBytes(picture)]
@@ -163,6 +161,7 @@ class OWStatsPlugin(Star):
                         + report["task_id"]
                     )
                 )
+            chain.append(Plain(text=CONTRIBUTION_NOTICE))
             yield event.chain_result(chain)
         except ValueError as exc:
             yield event.plain_result(str(exc))

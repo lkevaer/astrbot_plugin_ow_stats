@@ -6,7 +6,7 @@ from pathlib import Path
 
 import httpx
 
-from ..core import Bindings, OWClient, parse_tags, team_tags
+from ..core import EMPTY_QUERY_NOTICE, Bindings, OWClient, has_rated_players, parse_tags, team_tags
 
 TASK = "a" * 32
 
@@ -50,6 +50,20 @@ class CoreTests(unittest.TestCase):
 
 
 class ClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_null_or_empty_successful_responses_have_local_deployment_advice(self):
+        for payload in (None, [], {}, {"success": True, "data": None}, {"success": True, "data": {"status": "done", "result": None}}):
+            client = OWClient("https://ow.test", transport=httpx.MockTransport(lambda _: httpx.Response(200, json=payload)))
+            try:
+                with self.assertRaisesRegex(ValueError, EMPTY_QUERY_NOTICE):
+                    await client.rating("competitive", ["甲#1234"], 0)
+            finally:
+                await client.close()
+
+    def test_zero_is_a_valid_score_but_missing_or_nonfinite_values_are_not(self):
+        for value in (None, True, float("nan"), float("inf"), "80"):
+            self.assertFalse(has_rated_players({"players": [{"score": value}]}))
+        self.assertTrue(has_rated_players({"players": [{"score": 0}]}))
+
     async def test_queue_polling_keeps_one_task_and_returns_unmodified_result(self):
         calls = []
         result = {"players": [], "scoring_version": "from-existing-web-service"}

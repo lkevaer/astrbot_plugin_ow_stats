@@ -13,6 +13,40 @@ from .fixtures import make_report
 
 
 class RenderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_rating_image_includes_the_pale_red_notice_gray_bot_and_finite_kd(self):
+        from ..core import CONTRIBUTION_NOTICE
+        report = make_report(1, "competitive")
+        report["players"][0]["bot_matches"] = 1
+        report["players"][0]["matches"][0].update(is_bot=True, score=20, grade="D", score_grade="D", role="support", kd=12, kd_perfect=False)
+        report["players"][0]["matches"][0]["stats"].update(kill=12, death=0)
+        renderer, observed = WebRenderer(), []
+        original = Page.screenshot
+
+        async def inspect(page, *args, **kwargs):
+            observed.append(await page.evaluate("""() => {
+                const notice = document.querySelector('.contribution-warning');
+                const badge = document.querySelector('#details .bot-badge');
+                return {notice: notice.textContent, color: getComputedStyle(notice).color,
+                        aboveResults: notice.getBoundingClientRect().bottom < document.querySelector('#results').getBoundingClientRect().top,
+                        badge: badge.textContent, background: getComputedStyle(badge).backgroundColor,
+                        body: document.querySelector('main').innerText};
+            }"""))
+            return await original(page, *args, **kwargs)
+
+        try:
+            with patch.object(Page, "screenshot", inspect):
+                png = await renderer.render(report)
+            self.assertTrue(png.startswith(b"\x89PNG"))
+            self.assertEqual(observed[-1]["notice"], CONTRIBUTION_NOTICE)
+            self.assertEqual(observed[-1]["color"], "rgb(237, 172, 181)")
+            self.assertTrue(observed[-1]["aboveResults"])
+            self.assertEqual(observed[-1]["badge"], "BOT")
+            self.assertEqual(observed[-1]["background"], "rgb(74, 79, 88)")
+            self.assertIn("12.00", observed[-1]["body"])
+            self.assertNotIn("∞", observed[-1]["body"])
+        finally:
+            await renderer.close()
+
     async def test_hero_rate_images_include_every_hero_and_all_filter_labels(self):
         renderer = WebRenderer()
         original = Page.screenshot

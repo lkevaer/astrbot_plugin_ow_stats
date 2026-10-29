@@ -8,13 +8,16 @@ import sqlite3
 import time
 import unicodedata
 import hashlib
+import math
 from contextlib import closing
 from pathlib import Path
 
 import httpx
 
 TAG = re.compile(r"[^\s#,，、;；]{1,32}#[0-9]{3,12}")
-NOTICE = "仅比较本名单各自匹配池近12场；段位跨度过大时上下等马评级无意义。"
+CONTRIBUTION_NOTICE = "数据不能反映出全部贡献，单局评分高低只是基于队友区分，与敌方无关。"
+EMPTY_QUERY_NOTICE = "暂未获得可用战绩，可能是网易大神搜索接口维护中或服务器异常，建议部署到本地查询。"
+NOTICE = "仅比较本名单各自匹配池近12场；段位跨度过大时上下等马评级无意义。\n" + CONTRIBUTION_NOTICE
 HELP = (
     """守望评分机器人（群聊先@机器人）
 /help 或 /帮助：查看全部指令和作用。
@@ -34,6 +37,15 @@ https://lkevaer.xyz
 """
     + NOTICE
 )
+
+
+def has_rated_players(report: dict) -> bool:
+    players = report.get("players")
+    return isinstance(players, list) and any(
+        isinstance(row, dict) and isinstance(row.get("score"), (int, float))
+        and not isinstance(row["score"], bool) and math.isfinite(row["score"])
+        for row in players
+    )
 
 
 def parse_tags(text: str) -> list[str]:
@@ -179,10 +191,18 @@ class OWClient:
             if response.status_code in {429, 503} and retry.isdigit() and "秒" not in message:
                 message += f"，请在{min(int(retry), 900)}秒后重试"
             raise ValueError(f"战绩服务：{str(message)[:180]}")
-        payload = response.json()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ValueError(EMPTY_QUERY_NOTICE) from exc
+        if not isinstance(payload, dict) or not payload:
+            raise ValueError(EMPTY_QUERY_NOTICE)
         if payload.get("success") is False:
             raise ValueError("战绩服务未返回成功结果，请稍后重试。")
-        return payload.get("data", payload)
+        data = payload.get("data", payload)
+        if not isinstance(data, dict):
+            raise ValueError(EMPTY_QUERY_NOTICE)
+        return data
 
     async def rating(
         self, mode: str, tags: list[str], poll_interval: float = 2, *, actor=None
@@ -217,7 +237,11 @@ class OWClient:
             job = await self.request("GET", f"/api/batch-rating/tasks/{task_id}", actor=actor)
         if job.get("status") == "error":
             raise ValueError(str(job.get("error") or "战绩查询失败")[:180])
-        if job.get("status") != "done" or not isinstance(job.get("result"), dict):
+        if job.get("status") == "done" and not isinstance(job.get("result"), dict):
+            raise ValueError(EMPTY_QUERY_NOTICE)
+        if not job:
+            raise ValueError(EMPTY_QUERY_NOTICE)
+        if job.get("status") != "done":
             raise ValueError("战绩查询未完成，没有生成评分。")
         return {**job["result"], "task_id": task_id}
 
